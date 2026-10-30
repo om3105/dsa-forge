@@ -503,3 +503,10 @@ h1, .lesson-title, .next-up-title, .page-head h1 { font-weight: 700; letter-spac
   .seg button { flex: 1 1 auto; text-align: center; }
   .seg button + button { border-left: 1px solid var(--border-strong); }
 }
+
+/* ---------- read aloud ---------- */
+.listen-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 0; margin-bottom: 8px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.listen-rate { margin-left: auto; width: auto; padding: 4px 6px; font: 500 13px/1.2 var(--sans); }
+.learn .speaking { background: var(--accent-soft); border-radius: 4px; box-shadow: 0 0 0 4px var(--accent-soft); transition: background 0.2s; }
+@media (max-width: 760px) { .listen-rate { font-size: 16px; } }

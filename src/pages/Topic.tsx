@@ -1,5 +1,5 @@
 /* Topic page: the fixed learning flow as a horizontal stepper. Each stage unlocks after the previous one. */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Check, Code2, Lock, NotebookPen, RotateCcw, Route } from 'lucide-react';
 import { useCourse } from '../App';
@@ -17,7 +17,8 @@ import {
 } from '../lib/flow';
 import { questionState } from '../lib/lcmap';
 import { today } from '../lib/srs';
-import { Visualizer } from '../components/Visualizer';
+import { Visualizer, hasVisual } from '../components/Visualizer';
+import { ListenBar } from '../components/ListenBar';
 import { CodeBlock, DiffTag, Inline, Md, formatDate } from '../components/ui';
 import { StatusPill } from './LeetCodeMap';
 import type { CourseId, CourseState } from '../types';
@@ -154,52 +155,63 @@ function UnderstandStage({ course, topic, c }: { course: CourseId; topic: string
   const ex = EXPLAIN[topic];
   const lesson = getLesson(course, topic);
   const done = !!c.topics[topic]?.understandAt;
+  const articleRef = useRef<HTMLElement>(null);
   if (!u) return <p className="faint">No theory content for this topic yet.</p>;
+  // data-say marks what the Listen bar reads aloud; tables, code and the quiz are skipped.
   return (
-    <article className="prose learn" style={{ maxWidth: 760 }}>
+    <article className="prose learn" style={{ maxWidth: 760 }} ref={articleRef}>
+      <ListenBar target={articleRef} id={`${course}:${topic}`} />
       {ex && (
         <section>
-          <p className="lead">{ex.oneLiner}</p>
-          <p className="muted">{ex.whyCare}</p>
+          <p className="lead" data-say="">{ex.oneLiner}</p>
+          <p className="muted" data-say="">{ex.whyCare}</p>
         </section>
       )}
-      <p className="aside-note">{u.analogy}</p>
+      <p className="aside-note" data-say="">{u.analogy}</p>
 
       {ex?.terms.length ? (
         <section>
-          <h2>Terms</h2>
-          <dl className="terms">{ex.terms.map(([t, d]) => <div key={t}><dt>{t}</dt><dd>{d}</dd></div>)}</dl>
+          <h2 data-say="">Terms</h2>
+          <dl className="terms">{ex.terms.map(([t, d]) => <div key={t} data-say={`${t}. ${d}`}><dt>{t}</dt><dd>{d}</dd></div>)}</dl>
         </section>
       ) : null}
 
       {ex && (
         <section>
-          <h2>An example</h2>
-          <p className="small muted" style={{ marginBottom: 8 }}>{ex.example.title}. Try it on paper first.</p>
-          <ol className="trace">{ex.example.steps.map((st, i) => <li key={i}><Inline text={st} /></li>)}</ol>
-          <p style={{ marginTop: 12 }}>{ex.example.takeaway}</p>
+          <h2 data-say="">An example</h2>
+          <p className="small muted" style={{ marginBottom: 8 }} data-say={`${ex.example.title}.`}>{ex.example.title}. Try it on paper first.</p>
+          <ol className="trace">{ex.example.steps.map((st, i) => <li key={i} data-say=""><Inline text={st} /></li>)}</ol>
+          <p style={{ marginTop: 12 }} data-say="">{ex.example.takeaway}</p>
+        </section>
+      )}
+
+      {hasVisual(topic) && (
+        <section>
+          <h2>Watch it run</h2>
+          <p className="small muted" style={{ marginBottom: 8 }}>Press <strong>Play with voice</strong> for a narrated walkthrough, or step through it yourself. The Visualize stage later asks you to predict each step.</p>
+          <Visualizer topic={topic} id="theory" />
         </section>
       )}
 
       {lesson.concept && (
         <section>
-          <h2>The idea in more depth</h2>
-          <Md text={lesson.concept.intuition} lang={course} />
+          <h2 data-say="">The idea in more depth</h2>
+          <div data-say-children=""><Md text={lesson.concept.intuition} lang={course} /></div>
         </section>
       )}
       {lesson.foundation && (
         <section>
-          <h2>In {PACKS[course].name}</h2>
-          <p>{lesson.foundation.intro}</p>
+          <h2 data-say="">In {PACKS[course].name}</h2>
+          <p data-say="">{lesson.foundation.intro}</p>
           {lesson.foundation.sections.map((sec, i) => (
-            <section key={i}><h3>{sec.title}</h3><Md text={sec.body} lang={course} />{sec.code && <CodeBlock code={sec.code} lang={course} />}</section>
+            <section key={i}><h3 data-say="">{sec.title}</h3><div data-say-children=""><Md text={sec.body} lang={course} /></div>{sec.code && <CodeBlock code={sec.code} lang={course} />}</section>
           ))}
         </section>
       )}
 
       <section>
-        <h2>Formal definition</h2>
-        <p><Inline text={u.definition} /></p>
+        <h2 data-say="">Formal definition</h2>
+        <p data-say=""><Inline text={u.definition} /></p>
       </section>
 
       {lesson.concept && (
@@ -216,8 +228,8 @@ function UnderstandStage({ course, topic, c }: { course: CourseId; topic: string
 
       {ex?.confusions.length ? (
         <section>
-          <h2>Easy to get wrong</h2>
-          <ul className="confusions">{ex.confusions.map((x) => <li key={x}><Inline text={x} /></li>)}</ul>
+          <h2 data-say="">Easy to get wrong</h2>
+          <ul className="confusions">{ex.confusions.map((x) => <li key={x} data-say=""><Inline text={x} /></li>)}</ul>
         </section>
       ) : null}
 

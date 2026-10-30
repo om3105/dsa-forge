@@ -1,7 +1,8 @@
 /* Step-through walkthrough with Next / Previous / Play and an optional predict mode:
    before each step that has a question, you commit to an answer, then the step is revealed. */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, ChevronRight, Pause, Play, RotateCcw, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Volume2, X } from 'lucide-react';
+import { speak, speechSupported, stopSpeaking } from '../lib/speech';
 import { GENERATORS, type CellState, type Frame } from './viz/frames';
 
 function Side({ side }: { side?: { label: string; value: string }[] }) {
@@ -80,14 +81,16 @@ export interface PredictResult { correct: number; total: number }
 
 export function hasVisual(topic: string) { return !!GENERATORS[topic]; }
 
-export function Visualizer({ topic, predictMode = false, onFinish }: { topic: string; predictMode?: boolean; onFinish?: (r: PredictResult) => void }) {
+export function Visualizer({ topic, predictMode = false, onFinish, id = 'viz' }: { topic: string; predictMode?: boolean; onFinish?: (r: PredictResult) => void; id?: string }) {
   const gen = GENERATORS[topic];
   const frames = useMemo(() => gen?.make() ?? [], [gen]);
   const [i, setI] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [finished, setFinished] = useState(false);
-  useEffect(() => { setI(0); setAnswers({}); setFinished(false); setPlaying(false); }, [topic, predictMode]);
+  const [voice, setVoice] = useState(false); // narrated playback: each caption is read aloud before moving on
+  const owner = `viz:${id}:${topic}`;
+  useEffect(() => { setI(0); setAnswers({}); setFinished(false); setPlaying(false); setVoice(false); }, [topic, predictMode]);
 
   const f = frames[i];
   const needsAnswer = predictMode && !!f?.predict && answers[i] === undefined;
@@ -96,10 +99,22 @@ export function Visualizer({ topic, predictMode = false, onFinish }: { topic: st
 
   useEffect(() => {
     if (!playing) return;
+    if (voice) {
+      // Read this step, pause briefly, then move on (or stop after the last step).
+      let t: ReturnType<typeof setTimeout>;
+      const cancel = speak(frames[i]?.caption ?? '', {
+        owner,
+        onEnd: () => { t = setTimeout(() => (i >= frames.length - 1 ? (setPlaying(false), setVoice(false)) : setI((x) => x + 1)), 450); },
+        onStop: () => { setPlaying(false); setVoice(false); },
+      });
+      return () => { clearTimeout(t); cancel(); };
+    }
     if (i >= frames.length - 1 || needsAnswer) { setPlaying(false); return; }
     const t = setTimeout(() => setI((x) => x + 1), 1400);
     return () => clearTimeout(t);
-  }, [playing, i, frames.length, needsAnswer]);
+  }, [playing, voice, i, frames, needsAnswer, owner]);
+  useEffect(() => () => stopSpeaking(owner), [owner]);
+  const stopVoice = () => { setPlaying(false); setVoice(false); stopSpeaking(owner); };
 
   useEffect(() => {
     if (i === frames.length - 1 && frames.length && !finished && (!predictMode || frames.every((fr, k) => !fr.predict || answers[k] !== undefined || k === frames.length - 1))) {
@@ -137,13 +152,18 @@ export function Visualizer({ topic, predictMode = false, onFinish }: { topic: st
         </div>
       )}
       <div className="viz-controls">
-        <button className="btn sm" onClick={() => { setPlaying(false); setI((x) => Math.max(0, x - 1)); }} disabled={i === 0}><ChevronLeft size={14} /> Previous</button>
-        <button className="btn sm" disabled={needsAnswer} onClick={() => { if (i >= frames.length - 1) setI(0); setPlaying((p) => !p); }}>
-          {playing ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Play</>}
+        <button className="btn sm" onClick={() => { stopVoice(); setI((x) => Math.max(0, x - 1)); }} disabled={i === 0}><ChevronLeft size={14} /> Previous</button>
+        {!predictMode && speechSupported() && (
+          voice && playing
+            ? <button className="btn sm primary" onClick={stopVoice}><Pause size={13} /> Pause voice</button>
+            : <button className="btn sm primary" onClick={() => { if (i >= frames.length - 1) setI(0); setVoice(true); setPlaying(true); }}><Volume2 size={13} /> Play with voice</button>
+        )}
+        <button className="btn sm" disabled={needsAnswer || (voice && playing)} onClick={() => { if (i >= frames.length - 1) setI(0); setVoice(false); setPlaying((p) => !p); }}>
+          {playing && !voice ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Play</>}
         </button>
-        <button className="btn sm" onClick={() => { setPlaying(false); setI((x) => Math.min(frames.length - 1, x + 1)); }} disabled={i === frames.length - 1 || needsAnswer}>Next <ChevronRight size={14} /></button>
-        <button className="icon-btn" title="Restart" onClick={() => { setPlaying(false); setI(0); setAnswers({}); setFinished(false); }}><RotateCcw size={13} /></button>
-        {!predictMode && <input type="range" min={0} max={frames.length - 1} value={i} onChange={(e) => { setPlaying(false); setI(Number(e.target.value)); }} style={{ flex: 1 }} aria-label="Step" />}
+        <button className="btn sm" onClick={() => { stopVoice(); setI((x) => Math.min(frames.length - 1, x + 1)); }} disabled={i === frames.length - 1 || needsAnswer}>Next <ChevronRight size={14} /></button>
+        <button className="icon-btn" title="Restart" onClick={() => { stopVoice(); setI(0); setAnswers({}); setFinished(false); }}><RotateCcw size={13} /></button>
+        {!predictMode && <input type="range" min={0} max={frames.length - 1} value={i} onChange={(e) => { stopVoice(); setI(Number(e.target.value)); }} style={{ flex: 1 }} aria-label="Step" />}
         {predictMode && <span className="faint small" style={{ marginLeft: 'auto' }}>{needsAnswer ? 'Answer to continue' : ''}</span>}
       </div>
     </div>
