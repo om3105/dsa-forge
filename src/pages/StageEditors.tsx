@@ -1,4 +1,4 @@
-/* Editor pages used by the topic flow: Build (Stage 3), Guided practice (Stage 5), and the
+/* Editor pages used by the topic flow: Build (Stage 3, or 2 for foundation topics), Guided practice (Stage 5), and the
    blank-editor re-solve inside a topic review (Stage 7). */
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -6,10 +6,11 @@ import { ArrowLeft, Lightbulb } from 'lucide-react';
 import { useCourse } from '../App';
 import { actions } from '../store/store';
 import { BUILD_BY_TOPIC } from '../data/flow/build';
+import { BUILD_HINTS } from '../data/flow/buildHints';
 import { PROBLEM_BY_ID } from '../data/problems';
 import { TOPIC_BY_ID } from '../data/topics';
 import { LC_BY_ID } from '../data/lcQuestions';
-import { EXTRA_HINTS } from '../lib/flow';
+import { EXTRA_HINTS, stagesFor } from '../lib/flow';
 import { expectedFor, formatInputs } from '../lib/harness';
 import { SolveView } from '../components/SolveView';
 import { CodeBlock, DiffTag, Md, toast } from '../components/ui';
@@ -48,32 +49,67 @@ export function BuildPage() {
   const [tab, setTab] = useState<'task' | 'ref'>('task');
   if (!task) return <div className="page"><p>No build task for this topic.</p></div>;
   const passed = !!c.problems[task.id]?.passedAt;
+  const hints = BUILD_HINTS[topic] ?? [];
+  const used = c.hintsUsed[task.id] ?? 0;
+  const refOpen = passed || used > hints.length; // opened early through the help ladder
+  const stages = stagesFor(topic);
+  const stageNo = stages.indexOf('build') + 1;
   const left = (
     <>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'task'} onClick={() => setTab('task')}>Task</button>
-        <button role="tab" aria-selected={tab === 'ref'} onClick={() => setTab('ref')}>Reference {passed ? '' : '(locked)'}</button>
+        <button role="tab" aria-selected={tab === 'ref'} onClick={() => setTab('ref')}>Reference {refOpen ? '' : '(locked)'}</button>
       </div>
       <div className="pane-scroll statement">
         {tab === 'task' ? (
           <div className="stack-16">
-            <div className="eyebrow">Stage 3: Build from scratch</div>
+            <div className="eyebrow">Stage {stageNo} of {stages.length}: Build from scratch</div>
             <Statement p={task} course={course} />
             <p className="small muted">The editor starts with method signatures only. Write the whole structure yourself, without the built-in version.</p>
+            {hints.length > 0 && <BuildHelp course={course} id={task.id} hints={hints} used={used} passed={passed} onReference={() => setTab('ref')} />}
           </div>
-        ) : passed ? (
+        ) : refOpen ? (
           <div className="stack">
-            <p className="small muted">A clean reference implementation. Compare it with yours: naming, edge cases, complexity.</p>
+            <p className="small muted">{passed
+              ? 'A clean reference implementation. Compare it with yours: naming, edge cases, complexity.'
+              : 'Read it until you understand each line, then close this tab and write it yourself without looking. The stage completes when your own code passes the tests.'}</p>
             <CodeBlock code={task.ref[course]} lang={course} />
           </div>
-        ) : <p className="faint small">Pass every hidden test to see the reference implementation.</p>}
+        ) : <p className="faint small">Pass every hidden test to see the reference implementation, or use the help steps on the Task tab.</p>}
       </div>
     </>
   );
   return (
     <SolveView course={course} problem={task} left={left}
       toolbarLeft={<>{back(topic, 'build')}<span style={{ fontWeight: 600 }}>{TOPIC_BY_ID[topic]?.title}: {task.title}</span></>}
-      afterAccepted={() => <div className="callout ok small">All tests passed. Stage 3 is complete. <button className="btn sm" onClick={() => setTab('ref')}>Compare with the reference</button></div>} />
+      afterAccepted={() => <div className="callout ok small">All tests passed. Stage {stageNo} is complete. <button className="btn sm" onClick={() => setTab('ref')}>Compare with the reference</button></div>} />
+  );
+}
+
+/** Help for the Build stage: three steps that give away more each time, then the reference.
+ *  Using any of it marks the task as "help used" in the tracker. */
+function BuildHelp({ course, id, hints, used, passed, onReference }: { course: CourseId; id: string; hints: string[]; used: number; passed: boolean; onReference: () => void }) {
+  const LABELS = ['What to keep track of', 'The plan, step by step', 'Outline (pseudocode)'];
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      <div className="spread">
+        <span className="row" style={{ gap: 6 }}><Lightbulb size={14} /><strong className="small">Stuck? Get help one step at a time</strong></span>
+        <span className="small faint">{Math.min(used, hints.length)}/{hints.length}</span>
+      </div>
+      {hints.slice(0, used).map((h, i) => (
+        <div key={i} className="note small stack" style={{ gap: 4 }}>
+          <span className="faint">{LABELS[i] ?? `Step ${i + 1}`}</span>
+          {h.includes('\n') ? <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{h}</pre> : <span>{h}</span>}
+        </div>
+      ))}
+      {used < hints.length && (
+        <div><button className="btn sm" onClick={() => actions.revealHint(course, id, used + 1)}>Show {LABELS[used]?.toLowerCase() ?? `step ${used + 1}`}</button> <span className="faint small">marks "help used"</span></div>
+      )}
+      {used === hints.length && !passed && (
+        <div className="small">Still stuck? <button className="btn sm" onClick={() => { actions.revealHint(course, id, hints.length + 1); onReference(); }}>Show the reference solution</button></div>
+      )}
+      {used === 0 && <p className="faint small" style={{ margin: 0 }}>Try for 10 to 15 minutes first. Writing even a wrong attempt teaches more than reading the answer.</p>}
+    </div>
   );
 }
 
