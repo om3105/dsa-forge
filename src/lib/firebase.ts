@@ -1,6 +1,5 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 
 const env = import.meta.env;
 
@@ -15,8 +14,6 @@ export const firebaseApp = initializeApp({
 
 export const auth = getAuth(firebaseApp);
 
-// Offline-first: reads come from the local cache when offline and writes are queued until the
-// connection returns, so the app keeps working without a network (e.g. on the in-browser engines).
-export const db = initializeFirestore(firebaseApp, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-});
+// Firestore is the largest dependency in the app, and the sign-in screen does not need it.
+// It lives in its own module and is downloaded the first time something reads or writes data.
+export const loadFirestore = () => import('./firestore');

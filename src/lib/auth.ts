@@ -3,8 +3,7 @@ import {
   GoogleAuthProvider, createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
   sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut as fbSignOut, updateProfile, type User,
 } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth, loadFirestore } from './firebase';
 import { useAccountRepo } from '../store/repo';
 import { flushPending, loadAll } from '../store/store';
 
@@ -17,9 +16,9 @@ onAuthStateChanged(auth, async (user) => {
   useAccountRepo(user?.uid ?? null);
   if (user) {
     // profile document: who owns this data (merge keeps createdAt from the first sign-in)
-    void setDoc(doc(db, `users/${user.uid}`), {
+    void loadFirestore().then(({ db, doc, setDoc, serverTimestamp }) => setDoc(doc(db, `users/${user.uid}`), {
       email: user.email, displayName: user.displayName ?? null, lastSignInAt: serverTimestamp(),
-    }, { merge: true }).catch(() => {});
+    }, { merge: true })).catch(() => {});
     await loadAll();
   }
   set({ ready: true, user });
@@ -30,6 +29,7 @@ export const useAuth = () => useSyncExternalStore((l) => { listeners.add(l); ret
 export async function signUp(name: string, email: string, password: string) {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   if (name.trim()) await updateProfile(cred.user, { displayName: name.trim() });
+  const { db, doc, setDoc, serverTimestamp } = await loadFirestore();
   await setDoc(doc(db, `users/${cred.user.uid}`), { createdAt: serverTimestamp(), displayName: name.trim() || null }, { merge: true });
   void sendEmailVerification(cred.user).catch(() => {});
 }

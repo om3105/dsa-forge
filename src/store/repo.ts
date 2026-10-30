@@ -2,8 +2,7 @@
    Signed in: Cloud Firestore under users/{uid}/… (with Firestore's offline cache).
    The IndexedDB repo remains for data created before accounts existed, which is migrated on first sign-in. */
 import { createStore, del, get, keys, set } from 'idb-keyval';
-import { collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { loadFirestore } from '../lib/firebase';
 
 export interface Repo {
   get<T>(key: string): Promise<T | undefined>;
@@ -25,7 +24,8 @@ class IdbRepo implements Repo {
 class FirestoreRepo implements Repo {
   constructor(private uid: string) {}
 
-  private ref(key: string) {
+  private async ref(key: string) {
+    const { db, doc } = await loadFirestore();
     const base = `users/${this.uid}`;
     if (key === KEYS.settings) return doc(db, `${base}/meta/settings`);
     const course = /^v1:course:(\w+)$/.exec(key);
@@ -36,21 +36,27 @@ class FirestoreRepo implements Repo {
   }
 
   async get<T>(key: string): Promise<T | undefined> {
-    const snap = await getDoc(this.ref(key));
+    const { getDoc } = await loadFirestore();
+    const snap = await getDoc(await this.ref(key));
     const json = snap.exists() ? (snap.data().json as string | undefined) : undefined;
     return json === undefined ? undefined : (JSON.parse(json) as T);
   }
 
   async set(key: string, value: unknown) {
     const code = /^v1:code:(\w+):/.exec(key);
-    await setDoc(this.ref(key), { json: JSON.stringify(value), updatedAt: serverTimestamp(), ...(code ? { course: code[1] } : {}) });
+    const { setDoc, serverTimestamp } = await loadFirestore();
+    await setDoc(await this.ref(key), { json: JSON.stringify(value), updatedAt: serverTimestamp(), ...(code ? { course: code[1] } : {}) });
   }
 
-  async del(key: string) { await deleteDoc(this.ref(key)); }
+  async del(key: string) {
+    const { deleteDoc } = await loadFirestore();
+    await deleteDoc(await this.ref(key));
+  }
 
   async keys(prefix: string): Promise<string[]> {
     const code = /^v1:code:(\w+):$/.exec(prefix);
     if (!code) return [];
+    const { db, collection, getDocs, query, where } = await loadFirestore();
     const snap = await getDocs(query(collection(db, `users/${this.uid}/code`), where('course', '==', code[1])));
     return snap.docs.map((d) => `v1:code:${code[1]}:${d.id.slice(code[1].length + 2)}`);
   }

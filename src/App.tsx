@@ -12,20 +12,22 @@ import { signOut, useAuth } from './lib/auth';
 import AuthPage from './pages/AuthPage';
 import { EngineStatus } from './components/EngineStatus';
 import { COURSE_LABEL, type CourseId } from './types';
-import CourseSelect from './pages/CourseSelect';
-import Today from './pages/Today';
-import Roadmap from './pages/Roadmap';
-import Problems from './pages/Problems';
-import Revise from './pages/Revise';
-import Dashboard from './pages/Dashboard';
-import { TopicPage, TopicsIndex } from './pages/Topic';
-import Flashcards from './pages/Flashcards';
-import Notes from './pages/Notes';
-import Gotchas from './pages/Gotchas';
-import SettingsPage from './pages/Settings';
-import LeetCodeMap from './pages/LeetCodeMap';
-import LeetCodeQuestion from './pages/LeetCodeQuestion';
 
+// Every page is loaded on first visit, so the sign-in screen and first paint only download what they need.
+const CourseSelect = lazy(() => import('./pages/CourseSelect'));
+const Today = lazy(() => import('./pages/Today'));
+const Roadmap = lazy(() => import('./pages/Roadmap'));
+const Problems = lazy(() => import('./pages/Problems'));
+const Revise = lazy(() => import('./pages/Revise'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Flashcards = lazy(() => import('./pages/Flashcards'));
+const Notes = lazy(() => import('./pages/Notes'));
+const Gotchas = lazy(() => import('./pages/Gotchas'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const LeetCodeMap = lazy(() => import('./pages/LeetCodeMap'));
+const LeetCodeQuestion = lazy(() => import('./pages/LeetCodeQuestion'));
+const TopicPage = lazy(() => import('./pages/Topic').then((m) => ({ default: m.TopicPage })));
+const TopicsIndex = lazy(() => import('./pages/Topic').then((m) => ({ default: m.TopicsIndex })));
 // The editor-heavy pages pull in Monaco; load them only when visited.
 const ProblemWorkspace = lazy(() => import('./pages/ProblemWorkspace'));
 const Scratchpad = lazy(() => import('./pages/Scratchpad'));
