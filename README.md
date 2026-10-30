@@ -2,7 +2,7 @@
 
 A DSA (data structures and algorithms) learning app with two separate courses, **DSA with Python** and **DSA with Java**. I built it to prepare for placement interviews: a 60-day roadmap, lessons that start from zero, an in-browser code editor with a real judge, LeetCode problems that unlock only after you have learned what they need, and spaced repetition so topics don't fade.
 
-**Live app:** _LIVE_URL_
+**Live app:** https://dsa-forge-nu.vercel.app
 
 ## Why I built it
 
