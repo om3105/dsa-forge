@@ -11,7 +11,7 @@
 
 import { createServer } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, rm, chown } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, chown } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
@@ -24,7 +24,8 @@ const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map((s) => 
 
 const MAX_OUTPUT = 1024 * 1024;       // same cap the local Piston setup uses
 const MAX_RUN_MS = 15000;
-const JAVA_STARTUP_MS = 15000;        // the free instance has very little CPU; javac + JVM start is slow
+const JAVA_STARTUP_MS = 4000;         // JVM start on the free instance's tiny CPU (code is precompiled)
+const COMPILE_TIMEOUT_MS = 20000;
 const RUNS_PER_MINUTE = 30;
 
 const SANDBOX_UID = Number(execFileSync('id', ['-u', 'sandbox']).toString().trim());
@@ -66,6 +67,60 @@ function rateLimited(uid) {
   list.push(now);
   recentRuns.set(uid, list);
   return list.length > RUNS_PER_MINUTE;
+}
+
+// ---------------------------------------------------------------- java compiler
+
+// A long-running javac (CompileServer.java), started as the sandbox user and warmed up once, so each
+// Java submission only pays for starting the JVM that runs it. Requests are already serialized by
+// the run queue below, so one pending request at a time is enough.
+let compiler = null;
+function startCompiler() {
+  const proc = spawn('java', ['-Xmx128m', '-XX:+UseSerialGC', '-XX:TieredStopAtLevel=1', '-cp', '/app', 'CompileServer'], {
+    uid: SANDBOX_UID, gid: SANDBOX_GID, stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  const c = { proc, buffer: '', pending: null };
+  proc.stdout.setEncoding('utf8');
+  proc.stdout.on('data', (chunk) => {
+    c.buffer += chunk;
+    let nl;
+    while ((nl = c.buffer.indexOf('\n')) >= 0) {
+      const line = c.buffer.slice(0, nl);
+      c.buffer = c.buffer.slice(nl + 1);
+      const p = c.pending;
+      c.pending = null;
+      p?.resolve(line);
+    }
+  });
+  proc.on('exit', () => {
+    c.pending?.reject(new Error('compiler exited'));
+    if (compiler === c) compiler = null;
+  });
+  compiler = c;
+  return c;
+}
+
+function compileJava(dir) {
+  const c = compiler ?? startCompiler();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      // A stuck compile: restart the compiler so the next request gets a fresh one.
+      c.pending = null;
+      c.proc.kill('SIGKILL');
+      resolve({ ok: false, timedOut: true, output: '' });
+    }, COMPILE_TIMEOUT_MS);
+    c.pending = {
+      resolve: (line) => {
+        clearTimeout(timer);
+        if (line === 'OK') return resolve({ ok: true, output: '' });
+        const text = Buffer.from(line.replace(/^ERR /, ''), 'base64').toString('utf8');
+        // javac prints absolute paths; show them the way a local compile would ("Main.java:3: error")
+        resolve({ ok: false, output: text.split(dir + '/').join('').trim() });
+      },
+      reject: () => { clearTimeout(timer); resolve({ ok: false, timedOut: true, output: '' }); },
+    };
+    c.proc.stdin.write(dir + '\n');
+  });
 }
 
 // ---------------------------------------------------------------- running code
@@ -135,20 +190,26 @@ async function execute(body) {
       return [200, { language, version: PY_VERSION, run }];
     }
 
-    // Java: the single-file source launcher compiles in memory and runs in one JVM, which on a
-    // tiny CPU is roughly twice as fast as javac followed by java. The file name must match the
-    // public class, so keep what the client sent (Main.java by default).
+    // Java: compile with the warm compiler, then run the classes in a fresh sandboxed JVM.
+    // The file name must match the public class, so keep what the client sent (Main.java by default).
     const name = /^[A-Za-z_][A-Za-z0-9_]*\.java$/.test(file.name || '') ? file.name : 'Main.java';
     await writeFile(join(dir, name), file.content);
-    const run = await runProcess('java', ['-Xmx200m', '-Xss64m', '-XX:+UseSerialGC', '-XX:TieredStopAtLevel=1', name], {
-      cwd: dir, stdin: body.stdin, timeoutMs: runTimeout + JAVA_STARTUP_MS, memoryBytes: -1,
-    });
-    // Report compile errors the way Piston does, as a failed compile stage.
-    if (run.code !== 0 && /error: compilation failed/.test(run.stderr)) {
-      const compile = { ...run, stderr: run.stderr.replace(/error: compilation failed\s*$/, '').trim() };
+    await chown(join(dir, name), SANDBOX_UID, SANDBOX_GID);
+    const t0 = Date.now();
+    const compiled = await compileJava(dir);
+    const compileMs = Date.now() - t0;
+    if (!compiled.ok) {
+      const compile = compiled.timedOut
+        ? { stdout: '', stderr: '', output: '', code: null, signal: 'SIGKILL', status: 'TO', message: 'Compile time limit exceeded' }
+        : { stdout: '', stderr: compiled.output, output: compiled.output, code: 1, signal: null, status: null, message: null };
       return [200, { language, version: JAVA_VERSION, compile, run: { stdout: '', stderr: '', output: '', code: null, signal: null } }];
     }
-    return [200, { language, version: JAVA_VERSION, run }];
+    const mainClass = name.replace(/\.java$/, '');
+    const run = await runProcess('java', ['-Xmx192m', '-Xss64m', '-XX:+UseSerialGC', '-XX:TieredStopAtLevel=1', '-XX:SharedArchiveFile=/app/run.jsa', '-Xshare:auto', '-cp', '.', mainClass], {
+      cwd: dir, stdin: body.stdin, timeoutMs: runTimeout + JAVA_STARTUP_MS, memoryBytes: -1,
+    });
+    console.log(`java: compile ${compileMs} ms, run ${run.wall_time} ms`);
+    return [200, { language, version: JAVA_VERSION, compile: { stdout: '', stderr: '', output: '', code: 0, signal: null }, run }];
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -198,4 +259,22 @@ createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`runner listening on ${PORT} (python ${PY_VERSION}, java ${JAVA_VERSION})`);
+  warmUp();
 });
+
+// Compile real judge files (generated by the web app's harness, in warmup/) several times at startup
+// so javac is JIT-compiled before the first user run. On the free CPU it takes ~8 compiles to settle.
+async function warmUp() {
+  const samples = await Promise.all(['Function.java', 'Design.java'].map((f) => readFile(new URL(`./warmup/${f}`, import.meta.url), 'utf8')));
+  for (let i = 0; i < 10; i++) {
+    const dir = await mkdtemp(join(tmpdir(), 'warm-'));
+    try {
+      await chown(dir, SANDBOX_UID, SANDBOX_GID);
+      await writeFile(join(dir, 'Main.java'), samples[i % samples.length]);
+      await enqueue(() => compileJava(dir));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  console.log('java compiler warmed up');
+}

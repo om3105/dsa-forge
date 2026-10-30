@@ -40,7 +40,7 @@ export async function judge(
   }
   if (exec.status === 'compile-error') {
     const text = exec.compileOutput ?? '';
-    return { ...base, verdict: 'Compile Error', cases: [], passed: 0, errorText: text, markers: errorLines(course, text) };
+    return { ...base, verdict: 'Compile Error', cases: [], passed: 0, errorText: tidyCompileOutput(text), markers: errorLines(course, text) };
   }
 
   const { cases, trailing } = parseRun(exec.stdout, inputs.length);
@@ -77,4 +77,20 @@ export async function judge(
   const known = cases.filter((x) => x.expected !== undefined).length;
   if (known === 0) return { ...out, verdict: 'Finished' };
   return { ...out, verdict: passed === known ? (known === inputs.length ? 'Accepted' : 'Finished') : 'Wrong Answer' };
+}
+
+/** javac echoes the offending source line under each error. The Java driver is injected on the line
+ *  before your first class, so that echo can be one enormous line of judge code. Drop such echoes
+ *  (and the ^ marker under them); the editor already underlines the line. */
+export function tidyCompileOutput(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > 200 && !/^\S+\.java:\d+:/.test(lines[i])) {
+      if (/^\s*\^\s*$/.test(lines[i + 1] ?? '')) i++;
+      continue;
+    }
+    out.push(lines[i]);
+  }
+  return out.join('\n');
 }
