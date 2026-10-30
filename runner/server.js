@@ -209,6 +209,8 @@ async function execute(body) {
       cwd: dir, stdin: body.stdin, timeoutMs: runTimeout + JAVA_STARTUP_MS, memoryBytes: -1,
     });
     console.log(`java: compile ${compileMs} ms, run ${run.wall_time} ms`);
+    // A JVM that dies before the judge prints anything is a server problem, not the user's; log it.
+    if (run.code !== 0 && !run.stdout.includes('@@DSAFORGE@@')) console.log(`java run failed (code ${run.code}, signal ${run.signal}): ${(run.stderr || run.stdout).slice(0, 400)}`);
     return [200, { language, version: JAVA_VERSION, compile: { stdout: '', stderr: '', output: '', code: 0, signal: null }, run }];
   } finally {
     await rm(dir, { recursive: true, force: true });
