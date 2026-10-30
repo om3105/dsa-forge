@@ -1,0 +1,15 @@
+# Render blueprint for the code runner (the web app itself is on Vercel).
+services:
+  - type: web
+    name: dsa-forge-runner
+    runtime: docker
+    rootDir: runner
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /
+    envVars:
+      - key: FIREBASE_PROJECT_ID
+        value: dsa-forge-2026
+      - key: ALLOWED_ORIGINS
+        sync: false
