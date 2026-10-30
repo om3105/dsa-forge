@@ -1,0 +1,20 @@
+node_modules
+dist
+.DS_Store
+__pycache__/
+*.log
+
+# local environment (copy .env.example to .env)
+.env
+.env.local
+
+# Firebase CLI cache
+.firebase/
+
+# Piston runtime packages, installed by piston/install-runtimes.sh
+piston/data
+
+# downloaded by `npm run fetch:tools-jar` (JDK 8, GPLv2+CE)
+public/tools.jar
+
+.vercel
