@@ -1,0 +1,40 @@
+# Self-hosted code execution for DSA Forge.
+#   docker compose up -d        (from this folder)
+#   ./install-runtimes.sh       (once: installs Python 3.12 and Java into ./data/packages)
+# The app talks to http://localhost:2000 (configurable in Settings).
+services:
+  piston:
+    image: ghcr.io/engineer-man/piston
+    container_name: dsaforge_piston
+    restart: unless-stopped
+    privileged: true            # Piston uses isolate/cgroups for sandboxing; it needs this
+    volumes:
+      - ./data/packages:/piston/packages
+    tmpfs:
+      - /tmp:exec
+    environment:
+      # Upper bounds that requests may ask for. The app requests run_timeout = your
+      # Settings value (default 5 s) and compile_timeout = 20 s, so these must be >= that.
+      PISTON_RUN_TIMEOUT: "15000"
+      PISTON_COMPILE_TIMEOUT: "30000"
+      PISTON_RUN_CPU_TIME: "15000"
+      PISTON_COMPILE_CPU_TIME: "30000"
+      # Default is only 1024 characters, which would cut off judge output.
+      PISTON_OUTPUT_MAX_SIZE: "1048576"
+      PISTON_MAX_PROCESS_COUNT: "128"
+      PISTON_DISABLE_NETWORKING: "true"
+    expose:
+      - "2000"
+
+  # Piston does not send CORS headers, so a browser app on another origin cannot call it
+  # directly. This tiny proxy adds them and is the only thing published on the host.
+  cors:
+    image: nginx:1.27-alpine
+    container_name: dsaforge_piston_cors
+    restart: unless-stopped
+    depends_on:
+      - piston
+    ports:
+      - "127.0.0.1:2000:2000"   # local only. On a cloud VM see README before changing this.
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro

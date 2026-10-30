@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CheerpJ runner</title>
+  <!-- In-browser JVM (Java 8). Loaded only when this hidden iframe is created, i.e. on the first browser-side Java run. -->
+  <script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
+</head>
+<body>
+  <pre id="console"></pre>
+  <script>
+    // /app/ in CheerpJ maps to this web server's root; resolve relative to this page so sub-path deploys work.
+    const APP = (p) => '/app' + new URL(p, location.href).pathname;
+    const TOOLS_JAR = APP('./tools.jar');
+    const LOADER_JAR = APP('./cheerpj/dsaloader.jar');
+    const enc = new TextEncoder();
+    const cons = () => document.getElementById('console');
+
+    let ready = null;
+    async function init() {
+      const head = await fetch('./tools.jar', { method: 'HEAD' }).catch(() => null);
+      const type = head && head.headers.get('content-type') || '';
+      if (!head || !head.ok || type.includes('text/html')) {
+        throw new Error('tools.jar not found. Run "npm run fetch:tools-jar" once to download the Java compiler for the in-browser engine.');
+      }
+      await cheerpjInit({ status: 'none' });
+      // Warm-up: the first javac run on a cold JVM takes about a minute (downloading and JIT-ing
+      // the compiler). Do it now, while the user reads the problem, so their first Run is fast.
+      cheerpOSAddStringFile('/str/Warm.java', enc.encode('public class Warm { public static void main(String[] a) { System.out.println("ok"); } }'));
+      cheerpOSAddStringFile('/str/stdin.txt', enc.encode(''));
+      await cheerpjRunMain('DsaLoader', LOADER_JAR + ':' + TOOLS_JAR, '/files/warm/', 'Warm', '/str/Warm.java', '/str/stdin.txt');
+      cons().textContent = '';
+      parent.postMessage({ type: 'status', state: 'ready' }, '*');
+    }
+
+    window.addEventListener('message', async (e) => {
+      const msg = e.data || {};
+      if (msg.type !== 'run' && msg.type !== 'preload') return;
+      try {
+        if (!ready) { parent.postMessage({ type: 'status', state: 'loading' }, '*'); ready = init(); }
+        await ready;
+      } catch (err) {
+        ready = null;
+        parent.postMessage({ type: 'status', state: 'error', message: String(err.message || err) }, '*');
+        parent.postMessage({ type: 'result', id: msg.id, status: 'engine-error', message: String(err.message || err) }, '*');
+        return;
+      }
+      if (msg.type === 'preload') return;
+
+      const { id, source, stdin, mainClass } = msg;
+      const srcPath = '/str/' + mainClass + '.java';
+      cheerpOSAddStringFile(srcPath, enc.encode(source));
+      cheerpOSAddStringFile('/str/stdin.txt', enc.encode(stdin || ''));
+      cons().textContent = '';
+      let started = false;
+      const mo = new MutationObserver(() => {
+        if (!started && cons().textContent.includes('@@RUN@@')) { started = true; parent.postMessage({ type: 'started', id }, '*'); }
+      });
+      mo.observe(cons(), { childList: true, subtree: true, characterData: true });
+      const outDir = '/files/run' + Date.now() + '/';
+      const t0 = performance.now();
+      let code = null;
+      try {
+        code = await cheerpjRunMain('DsaLoader', LOADER_JAR + ':' + TOOLS_JAR, outDir, mainClass, srcPath, '/str/stdin.txt');
+      } catch (err) {
+        parent.postMessage({ type: 'result', id, status: 'engine-error', message: String(err) }, '*');
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 30)); // let the console element catch up
+      mo.disconnect();
+      parent.postMessage({ type: 'result', id, exitCode: code, text: cons().innerText, wallMs: Math.round(performance.now() - t0) }, '*');
+    });
+    parent.postMessage({ type: 'status', state: 'frame-ready' }, '*');
+  </script>
+</body>
+</html>
