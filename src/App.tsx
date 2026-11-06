@@ -238,7 +238,13 @@ function SignedInShell() {
 export default function App() {
   return (
     <HashRouter>
-      <Shell />
+      {/* Outer safety net: CourseSelect (shown to brand-new accounts) is a lazy page rendered
+          outside the routes, and a lazy page with no Suspense above it crashed the whole app. */}
+      <ErrorBoundary>
+        <Suspense fallback={<SlowLoading text="Loading…" />}>
+          <Shell />
+        </Suspense>
+      </ErrorBoundary>
       <ToastHost />
     </HashRouter>
   );
