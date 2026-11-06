@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { browserLocalPersistence, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth';
 
 const env = import.meta.env;
 
@@ -12,7 +12,11 @@ export const firebaseApp = initializeApp({
   appId: env.VITE_FIREBASE_APP_ID,
 });
 
-export const auth = getAuth(firebaseApp);
+// initializeAuth instead of getAuth: getAuth also sets up the popup/redirect helper, which on mobile
+// browsers downloads Google's gapi script and an iframe before the signed-in state is known. If that
+// script is slow or blocked (ad blockers, Brave, some networks) the app never gets past "Loading…".
+// The helper is passed only to signInWithPopup instead (see auth.ts).
+export const auth = initializeAuth(firebaseApp, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
 
 // Firestore is the largest dependency in the app, and the sign-in screen does not need it.
 // It lives in its own module and is downloaded the first time something reads or writes data.

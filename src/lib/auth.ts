@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import {
   GoogleAuthProvider, createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
-  sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut as fbSignOut, updateProfile, type User,
+  browserPopupRedirectResolver, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut as fbSignOut, updateProfile, type User,
 } from 'firebase/auth';
 import { auth, loadFirestore } from './firebase';
 import { useAccountRepo } from '../store/repo';
@@ -35,7 +35,7 @@ export async function signUp(name: string, email: string, password: string) {
 }
 
 export const signIn = (email: string, password: string) => signInWithEmailAndPassword(auth, email, password);
-export const signInWithGoogle = () => signInWithPopup(auth, new GoogleAuthProvider());
+export const signInWithGoogle = () => signInWithPopup(auth, new GoogleAuthProvider(), browserPopupRedirectResolver);
 export const resetPassword = (email: string) => sendPasswordResetEmail(auth, email);
 export async function signOut() {
   await flushPending();
