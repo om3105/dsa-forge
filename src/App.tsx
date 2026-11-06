@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { HashRouter, Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   BookOpen, Brain, CalendarDays, ChartNoAxesColumn, Layers, ListChecks, Menu, NotebookPen, RotateCcw,
@@ -138,9 +138,46 @@ function TabBar({ onMenu }: { onMenu: () => void }) {
   );
 }
 
+/** A loading message that, if it is still showing after a while, says what to do instead of
+ *  leaving a phone on a slow connection with a screen that looks frozen. */
+function SlowLoading({ text }: { text: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setSlow(true), 12000); return () => clearTimeout(t); }, []);
+  return (
+    <div className="empty stack" style={{ alignItems: 'center' }}>
+      <div>{text}</div>
+      {slow && (
+        <>
+          <div className="small muted" style={{ maxWidth: 340 }}>This is taking longer than usual, probably a slow connection. Your progress is safe.</div>
+          <button className="btn sm" onClick={() => location.reload()}>Reload</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Without this, an error while rendering a page unmounts everything and leaves a blank screen. */
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error('page crashed', error); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    // A failed chunk download (new deploy, flaky network) is fixed by a reload.
+    const chunk = /dynamically imported module|Importing a module script failed|Failed to fetch/i.test(this.state.error.message);
+    return (
+      <div className="empty stack" style={{ alignItems: 'center' }}>
+        <div>{chunk ? 'Could not load this page. Check your connection and reload.' : 'Something went wrong on this page.'}</div>
+        <div className="small faint" style={{ maxWidth: 420 }}>{this.state.error.message}</div>
+        <button className="btn sm" onClick={() => location.reload()}>Reload</button>
+      </div>
+    );
+  }
+}
+
 function Shell() {
   const authState = useAuth();
-  if (!authState.ready) return <div className="empty">Loading…</div>;
+  if (!authState.ready) return <SlowLoading text="Loading…" />;
   if (!authState.user) return <AuthPage />;
   return <SignedInShell key={authState.user.uid} />;
 }
@@ -152,7 +189,7 @@ function SignedInShell() {
   useEffect(() => { applyTheme(settings.theme, course); }, [settings.theme, course]);
   useEffect(() => { setNavOpen(false); }, [loc.pathname]);
 
-  if (!app.loaded) return <div className="empty">Loading your progress…</div>;
+  if (!app.loaded) return <SlowLoading text="Loading your progress…" />;
   if (!settings.lastCourse) return <CourseSelect />;
   const fullBleed = loc.pathname.startsWith('/problem/') || loc.pathname.startsWith('/scratchpad') || loc.pathname.startsWith('/interview/') || /^\/(build|guided|resolve)\//.test(loc.pathname);
 
@@ -167,7 +204,8 @@ function SignedInShell() {
       <Sidebar onNavigate={() => setNavOpen(false)} />
       <TabBar onMenu={() => setNavOpen(true)} />
       <main className="main" style={fullBleed ? { overflow: 'hidden' } : undefined}>
-        <Suspense fallback={<div className="empty">Loading…</div>}>
+        <ErrorBoundary key={loc.pathname}>
+        <Suspense fallback={<SlowLoading text="Loading…" />}>
           <Routes>
             <Route path="/" element={<Today />} />
             <Route path="/revise" element={<Revise />} />
@@ -191,6 +229,7 @@ function SignedInShell() {
             <Route path="*" element={<div className="page"><p>Not found.</p></div>} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </main>
     </div>
   );

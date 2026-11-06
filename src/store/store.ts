@@ -74,16 +74,16 @@ window.addEventListener('pagehide', () => void flushAll());
 let activeRepoNow: Repo = localRepo;
 
 /** Data saved in this browser before accounts existed is copied into the account the first time it signs in. */
-async function migrateLocalData(repo: Repo) {
-  if (repo === localRepo) return;
-  const hasCloud = (await repo.get(KEYS.settings)) !== undefined || (await Promise.all(COURSES.map((c) => repo.get(KEYS.course(c))))).some(Boolean);
-  if (hasCloud) return;
+/** First sign-in on a browser that has progress from before accounts existed: copy it to the
+ *  account. Returns the copied settings and courses so loadAll can use them without re-reading. */
+async function migrateLocalData(repo: Repo): Promise<[Settings | undefined, ...(CourseState | undefined)[]]> {
   const keys = [KEYS.settings, ...COURSES.map((c) => KEYS.course(c))];
   for (const c of COURSES) keys.push(...(await localRepo.keys(KEYS.codePrefix(c))));
-  for (const k of keys) {
-    const v = await localRepo.get(k);
-    if (v !== undefined) await repo.set(k, v);
-  }
+  const values = await Promise.all(keys.map((k) => localRepo.get(k)));
+  // Not awaited: Firestore applies writes to its local cache at once, and the promise only
+  // resolves when the server confirms, which on slow mobile data can take a long time.
+  keys.forEach((k, i) => { if (values[i] !== undefined) void repo.set(k, values[i]).catch((e) => console.warn('migration write failed', k, e)); });
+  return values.slice(0, 1 + COURSES.length) as [Settings | undefined, ...(CourseState | undefined)[]];
 }
 
 export async function loadAll() {
@@ -93,8 +93,15 @@ export async function loadAll() {
   codeCache.clear();
   state = { ...state, loaded: false };
   emit();
-  try { await migrateLocalData(repo); } catch (e) { console.warn('local data migration failed', e); }
-  const settings = { ...DEFAULT_SETTINGS, ...((await repo.get<Settings>(KEYS.settings)) ?? {}) };
+  // Settings and both courses in parallel: one round trip instead of three on a new device.
+  let [savedSettings, ...savedCourses] = await Promise.all([
+    repo.get<Settings>(KEYS.settings),
+    ...COURSES.map((c) => repo.get<CourseState>(KEYS.course(c))),
+  ]);
+  if (repo !== localRepo && savedSettings === undefined && savedCourses.every((x) => !x)) {
+    try { [savedSettings, ...savedCourses] = await migrateLocalData(repo); } catch (e) { console.warn('local data migration failed', e); }
+  }
+  const settings = { ...DEFAULT_SETTINGS, ...(savedSettings ?? {}) };
   // A localhost server URL (the old default, or one set while developing) can never work on the
   // hosted site, so use the cloud runner there instead.
   const isLocal = (host: string) => /^(localhost|127\.0\.0\.1)$/.test(host);
@@ -104,12 +111,13 @@ export async function loadAll() {
     settings.pistonUrl = DEFAULT_SERVER;
   }
   const courses = { ...state.courses };
-  for (const c of COURSES) {
-    const saved = await repo.get<CourseState>(KEYS.course(c));
+  COURSES.forEach((c, i) => {
+    const saved = savedCourses[i];
     const base = saved ? { ...emptyCourse(c), ...saved } : emptyCourse(c);
     courses[c] = enrollTopics(base);
-    if (courses[c] !== base) await repo.set(KEYS.course(c), courses[c]); // persist newly scheduled topic reviews
-  }
+    // persist newly scheduled topic reviews (not awaited, see migrateLocalData)
+    if (courses[c] !== base) void repo.set(KEYS.course(c), courses[c]).catch((e) => console.warn('save failed', e));
+  });
   state = { loaded: true, settings, courses };
   emit();
 }

@@ -19,6 +19,9 @@ onAuthStateChanged(auth, async (user) => {
     void loadFirestore().then(({ db, doc, setDoc, serverTimestamp }) => setDoc(doc(db, `users/${user.uid}`), {
       email: user.email, displayName: user.displayName ?? null, lastSignInAt: serverTimestamp(),
     }, { merge: true })).catch(() => {});
+    // Fetch the most used pages' code while the progress loads, instead of after it.
+    void import('../pages/Today').catch(() => {});
+    void import('../pages/Topic').catch(() => {});
     await loadAll();
   }
   set({ ready: true, user });
