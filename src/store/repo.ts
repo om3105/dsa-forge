@@ -9,6 +9,9 @@ export interface Repo {
   set(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
   keys(prefix: string): Promise<string[]>;
+  /** Only what this device already has, without waiting for the network. `hit` is false when the
+   *  device has never seen the document (a new browser), so the caller must ask the server. */
+  getCached?<T>(key: string): Promise<{ hit: boolean; value?: T }>;
 }
 
 class IdbRepo implements Repo {
@@ -40,6 +43,17 @@ class FirestoreRepo implements Repo {
     const snap = await getDoc(await this.ref(key));
     const json = snap.exists() ? (snap.data().json as string | undefined) : undefined;
     return json === undefined ? undefined : (JSON.parse(json) as T);
+  }
+
+  async getCached<T>(key: string): Promise<{ hit: boolean; value?: T }> {
+    const { getDocFromCache } = await loadFirestore();
+    try {
+      const snap = await getDocFromCache(await this.ref(key));
+      const json = snap.exists() ? (snap.data().json as string | undefined) : undefined;
+      return { hit: true, value: json === undefined ? undefined : (JSON.parse(json) as T) };
+    } catch {
+      return { hit: false }; // not in the offline cache
+    }
   }
 
   async set(key: string, value: unknown) {

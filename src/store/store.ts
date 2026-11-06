@@ -59,7 +59,9 @@ async function write(key: string) {
   pendingWrites.delete(key);
   await repo.set(key, value);
 }
+let editsSinceLoad = 0; // a background refresh must never replace state the user has changed since
 function persist(key: string, value: unknown) {
+  editsSinceLoad++;
   pendingWrites.set(key, { value, repo: activeRepoNow });
   clearTimeout(timers[key]);
   timers[key] = setTimeout(() => void write(key), 250);
@@ -93,14 +95,35 @@ export async function loadAll() {
   codeCache.clear();
   state = { ...state, loaded: false };
   emit();
-  // Settings and both courses in parallel: one round trip instead of three on a new device.
-  let [savedSettings, ...savedCourses] = await Promise.all([
-    repo.get<Settings>(KEYS.settings),
-    ...COURSES.map((c) => repo.get<CourseState>(KEYS.course(c))),
-  ]);
+  const keys = [KEYS.settings, ...COURSES.map((c) => KEYS.course(c))];
+  // On a device that has used the account before, start from what it already has (instant), then
+  // check the server in the background. Otherwise read settings and both courses in parallel.
+  const cached = repo.getCached ? await Promise.all(keys.map((k) => repo.getCached!<unknown>(k))) : null;
+  const fromCache = !!cached && cached.every((c) => c.hit) && cached.some((c) => c.value !== undefined);
+  const values = fromCache ? cached!.map((c) => c.value) : await Promise.all(keys.map((k) => repo.get<unknown>(k)));
+  let [savedSettings, ...savedCourses] = values as [Settings | undefined, ...(CourseState | undefined)[]];
   if (repo !== localRepo && savedSettings === undefined && savedCourses.every((x) => !x)) {
     try { [savedSettings, ...savedCourses] = await migrateLocalData(repo); } catch (e) { console.warn('local data migration failed', e); }
   }
+  applyLoaded(repo, savedSettings, savedCourses);
+  if (fromCache) void refreshFromServer(repo, keys, values);
+}
+
+/** After a cache-first load: if the server has newer data (e.g. from another device) and nothing
+ *  was changed here in the meantime, load it. */
+async function refreshFromServer(repo: Repo, keys: string[], shown: unknown[]) {
+  try {
+    const fresh = await Promise.all(keys.map((k) => repo.get<unknown>(k)));
+    const changed = fresh.some((v, i) => JSON.stringify(v) !== JSON.stringify(shown[i]));
+    if (changed && editsSinceLoad === 0 && repo === activeRepoNow) {
+      const [st, ...cs] = fresh as [Settings | undefined, ...(CourseState | undefined)[]];
+      applyLoaded(repo, st, cs); // in place: no loading screen, the open page just updates
+    }
+  } catch { /* offline: keep what is shown */ }
+}
+
+/** Builds app state from stored settings and courses and shows it. */
+function applyLoaded(repo: Repo, savedSettings: Settings | undefined, savedCourses: (CourseState | undefined)[]) {
   const settings = { ...DEFAULT_SETTINGS, ...(savedSettings ?? {}) };
   // A localhost server URL (the old default, or one set while developing) can never work on the
   // hosted site, so use the cloud runner there instead.
@@ -119,6 +142,7 @@ export async function loadAll() {
     if (courses[c] !== base) void repo.set(KEYS.course(c), courses[c]).catch((e) => console.warn('save failed', e));
   });
   state = { loaded: true, settings, courses };
+  editsSinceLoad = 0;
   emit();
 }
 
