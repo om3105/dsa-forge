@@ -8,7 +8,26 @@
     <title>DSA Forge</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Shown until the app's JavaScript has downloaded (React replaces it). On slow mobile data that
+         can take a while, so the page is never blank, and after a delay it says what to do. -->
+    <style>
+      .boot { min-height: 100vh; display: grid; place-content: center; gap: 10px; text-align: center; padding: 24px;
+        font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; background: #F7F5F0; color: #57534C; }
+      .boot b { font-size: 22px; color: #1B1A18; } .boot b span { color: #3E7C86; }
+      .boot-slow { display: none; max-width: 340px; font-size: 14px; } .boot-slow a { color: #3E7C86; }
+      @media (prefers-color-scheme: dark) { .boot { background: #16181D; color: #B4B0A7; } .boot b { color: #E4E1DA; } .boot b span, .boot-slow a { color: #7FB8C1; } }
+    </style>
+    <div id="root"><div class="boot">
+      <b>DSA <span>Forge</span></b>
+      <div>Loading…</div>
+      <div class="boot-slow" id="boot-slow">This is taking longer than usual. Check your internet connection, then <a href="" onclick="location.reload(); return false;">reload the page</a>.</div>
+    </div></div>
+    <script>
+      setTimeout(function () {
+        var slow = document.getElementById('boot-slow');
+        if (slow) slow.style.display = 'block'; // still here means the app has not started yet
+      }, 12000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
